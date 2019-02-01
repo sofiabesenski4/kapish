@@ -16,26 +16,15 @@
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
 
-/*
-void free_args(char** args)
-{
-	int i = 0;
-	while(args[i])
-	{
-		free(args[i]);
-		i++;
-		
-	}
-}
-*/
+
+
 void kapish_sigint_handler(int sig_num)
 {
 	signal(SIGINT,kapish_sigint_handler);
 	
-	printf("enter 'exit' to kill kapish. To continue, press enter and/or type your commands when the prompt resets\n");
+	printf("enter 'exit' or CTRL+D to kill kapish. To continue, press enter and/or type your commands when the prompt resets\n");
 	fflush(stdin);
 }
-
 
 static void child_sigint_handler(int sig_num) 
 { 
@@ -71,6 +60,15 @@ char* take_input(void)
 	//enter the while look to interpret the characters one-by-one
 	while(1)
 	{
+		if (feof(stdin))
+		{
+			char temp[] = "exit";
+			memset(buffer,'\0',buf_size);
+			memcpy(buffer,temp,buf_size);
+			//printf("%s",buffer);
+			return buffer;
+		}
+		
 		//get the next user char
 		character = getchar();
 		//if it is a newline then the user input has ended 
@@ -91,23 +89,13 @@ char* take_input(void)
 		if (position>=buf_size)
 		{
 			buf_size += BUFFERSIZE*sizeof(char);
-			buffer = realloc(buffer, buf_size);
-			
-			
-		}
-		
-	}
-	
-	
-	
-	
-	
+			buffer = realloc(buffer, buf_size);	
+		}	
+	}	
 }
-
 
 char** tokenize_input(char* line)
 {
-	//printf("DEBUG: in tokenize_input\n");
 	//defining a bufersize to reference in this function.
 	//necessary to not just use the constant so that we can realloc a larger memspace in case of bufferoverflow
 	size_t tokens_buffer_size = BUFFERSIZE*sizeof(char*);
@@ -125,7 +113,6 @@ char** tokenize_input(char* line)
 		return NULL;
 	}
 	token = strtok(line,delims);
-	
 	while (token!=NULL)
 	{
 		//since strtok doesn't modify the position of the tokenized strings, it only adds a null character
@@ -143,11 +130,8 @@ char** tokenize_input(char* line)
 		{
 			tokens_buffer_size += tokens_buffer_size;
 			tokens = realloc(tokens, tokens_buffer_size);
-			if (!tokens){fprintf(stderr,"failed to realloc in tokenize_input");exit(EXIT_FAILURE);}
-			
+			if (!tokens){fprintf(stderr,"failed to realloc in tokenize_input");exit(EXIT_FAILURE);}	
 		}
-		
-		
 		//get the next token
 		token=strtok(NULL,delims);
 	}
@@ -155,9 +139,7 @@ char** tokenize_input(char* line)
 	tokens[i]=NULL;
 	//return the pointer to the tokenized strings 
 	return tokens;
-	
 } 
-
 
 int execute_shell_command(char **args)
 {
@@ -190,15 +172,18 @@ int execute_shell_command(char **args)
 		//int* status;
 		child_pid = pid;
 		waitpid(child_pid,&status_code,0);
-		if (status_code!=0)
-		{printf("child process %d exited successfully\n",(int)child_pid);}	
+		//if (status_code!=0)
+		//{printf("child process %d exited successfully\n",(int)child_pid);}	
 		return 0;
 	}
 	return 0;
 }
 
 /*
- * needs to handle the following commands from within kapish itself 
+ * handle arguments takes a list of string commands,
+ * and either processes the built in commands accordingly,
+ * or it passes the arguments in to the execute_shell_command function
+ * so another process can be spawned and handled. 
  * */
 int handle_arguments(char **args)
 {
@@ -218,7 +203,7 @@ int handle_arguments(char **args)
 		
 		args[1]==NULL)
 		{
-			printf("HOME= %s\n",getenv("HOME"));
+			//printf("HOME= %s\n",getenv("HOME"));
 			if (chdir(getenv("HOME"))!=0)
 			{fprintf(stderr,"error while cding to home\n");return 1;}
 		}
@@ -287,13 +272,10 @@ int handle_arguments(char **args)
 	
 	//This branch will attempt to execute the commands 
 	else{
-		printf("about to execute_shell_commands\n");
+		//printf("about to execute_shell_commands\n");
 		execute_shell_command(args);
 		return 0;
 	}
-	
-	//if control made it here, there was an error
-	return -1;
 	
 }
 
@@ -301,22 +283,30 @@ int handle_arguments(char **args)
 
 void shell_loop(void)
 {
-	
-	char* cmd_history = malloc(sizeof(char)*100);
+	char exit[]="exit";
 	while (1) {
 		
 		char* input_line;
 		int status;
 	
 		input_line = take_input();
+		//printf("input: %s",input_line);
 		
-//		printf("input: %s",input_line);
+		if (!strcmp(input_line,exit))
+		{
+			//sleep(1);
+			//printf("here");
+			free(input_line);
+			break;
+		}
 
 
 		char** args = tokenize_input(input_line);
 		status = handle_arguments(args);
 		free(args);
 		free(input_line);
+		
+		//if handle_arguments encountered an exit command, then it will return 2
 		if (status==2)
 		{break;}
 		/*
@@ -341,20 +331,24 @@ void shell_loop(void)
 	
 		*/
 	}
-	free(cmd_history);
+	
+	
+	
 	return;
 }
 
+
+//this function is for processing the rc file
 void process_rc()
 {
-	
-	
+
 	char* filepath;
 	filepath = getenv("HOME");
 	char *rc_path = malloc(BUFFERSIZE*sizeof(char));
 	strncpy(rc_path,filepath,BUFFERSIZE*sizeof(char));
 	strncat(rc_path,"/.kapishrc",12); 
-	//printf("checking filepath %s\n",rc_path);
+//rc_path now holds the path to the rc file which should be in the home directory
+
 	FILE *fp;
 	if ((fp = fopen(rc_path,"r"))==NULL)
 	{	printf("error opening rc file!!\n");
@@ -366,10 +360,10 @@ void process_rc()
 	
 	//char* line;
 	char** args;
+	
 	while(fgets(temp,BUFFERSIZE,fp))
-	{
+	{	//printf("%s",temp);
 		printf("? %s",temp);
-		
 		args = tokenize_input(temp);
 		handle_arguments(args);
 		memset(temp,'\0',BUFFERSIZE*sizeof(char));
@@ -378,17 +372,12 @@ void process_rc()
 	filepath=NULL;
 	free(temp);
 	free(rc_path);
-	fclose(fp);
-	
+	fclose(fp);	
 }
-
-
 int main(int argc, char **argv)
 {
 	signal(SIGINT,kapish_sigint_handler);
 	process_rc();
 	shell_loop();
-	
-	return EXIT_SUCCESS;
-	
+	return EXIT_SUCCESS;	
 }
